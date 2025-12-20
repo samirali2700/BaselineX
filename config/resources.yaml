@@ -1,0 +1,22 @@
+# BaselineX configuration
+# Defines which API endpoints are availability-critical
+# and should be verified against a known healthy baseline.
+version: 1.0.0
+apis:
+  - name: Orders API
+    base_url: https://api.example.com
+    endpoints:
+      - path: /orders
+        method: GET
+        expected_status: 200
+        request:
+          fixture:
+            type: synthetic
+            query_params:
+              - status: "test"
+            body_params:
+              - id: 1
+              - status: "test"
+              - createdAt: "2023-01-01"
+
+

@@ -1,0 +1,27 @@
+
+version: "1.0.0"
+name: "BaselineX"
+settings:
+    run: 
+        mode: manual # manual | scheduled
+        interval_minutes: 15
+        timeout_seconds: 5
+    
+    comparison:
+        strict_mode: false
+        allow_added_fields: true
+        allow_removed_fields: false
+
+    failure:
+        stop_on_first_failure: false
+        fail_threshold: 1
+    
+    output:
+        format: console # console | json
+        save_results: true
+        results_path: ./baseline_results/
+
+    logging: 
+        log_level: "INFO" # DEBUG | INFO | WARNING | ERROR
+        log_file: ./logs/baselinex.log
+    
