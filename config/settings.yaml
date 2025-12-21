@@ -2,6 +2,9 @@
 version: "1.0.0"
 name: "BaselineX"
 settings:
+    baseline:
+        required_successful_probes: 3
+
     run: 
         mode: manual # manual | scheduled
         interval_minutes: 15
@@ -18,7 +21,7 @@ settings:
     
     output:
         format: console # console | json
-        save_results: true
+        save_results: false
         results_path: ./baseline_results/
 
     logging: 

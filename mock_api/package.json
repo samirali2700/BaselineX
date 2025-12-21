@@ -1,0 +1,19 @@
+{
+  "name": "mock-api",
+  "version": "1.0.0",
+  "description": "Mock APIs for testing",
+  "main": "index.js",
+  "scripts": {
+    "users": "node users_api.js",
+    "posts": "node posts_api.js",
+    "comments": "node comments_api.js",
+    "all": "concurrently \"npm run users\" \"npm run posts\" \"npm run comments\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "concurrently": "^7.6.0"
+  }
+}

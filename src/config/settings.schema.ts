@@ -19,6 +19,13 @@ const LogLevelSchema = z.enum(['DEBUG', 'INFO', 'WARNING', 'ERROR']);
 /**
  * Run Configuration
  */
+const BaselineSettingsSchema = z.object({
+    required_successful_probes: z.number().int().positive().default(5),
+});
+
+/**
+ * Run Configuration
+ */
 const RunSettingsSchema = z.object({
     mode: RunModeSchema.default('manual'),
     interval_minutes: z.number().int().positive().default(60),
@@ -64,6 +71,7 @@ export const SettingsSchema = z.object({
     version: z.string(),
     name: z.string(),
     settings: z.object({
+        baseline: BaselineSettingsSchema,
         run: RunSettingsSchema,
         comparison: ComparisonSettingsSchema,
         failure: FailureSettingsSchema,
