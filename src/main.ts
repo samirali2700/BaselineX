@@ -3,7 +3,7 @@ import { showMainMenu } from "./engine/console_menu";
 import * as path from "path";
 import Database from "better-sqlite3";
 
-export async function main(db: Database.Database) {
+export async function main(db: Database.Database, verbose: boolean = false) {
   
   const setting_file_path = path.join(__dirname, "../config/settings.yaml");
   const resources_file_path = path.join(__dirname, "../config/resources.yaml");
@@ -11,5 +11,5 @@ export async function main(db: Database.Database) {
   const settings = loadSettingsConfig(setting_file_path);
   const resources = loadResourcesConfig(resources_file_path);
 
-  await showMainMenu(db, settings, resources);
+  await showMainMenu(db, settings, resources, verbose);
 }

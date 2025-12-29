@@ -59,6 +59,12 @@ const ApiEndpointSchema = z.object({
   required_fields: z
     .array(z.string().min(1))
     .optional(),
+
+  /**
+   * Stash values from response body for use in subsequent requests.
+   * Map of { variableName: responseField }
+   */
+  stash: z.record(z.string(), z.string()).optional(),
 });
 
 /**
@@ -88,6 +94,7 @@ const ApiEndpointWithConstraintsSchema = ApiEndpointSchema.superRefine(
  */
 const ApiSchema = z.object({
   name: z.string().min(1, "API name is required"),
+  disabled: z.boolean().optional(),
 
   base_url: z
     .url("Base URL must be a valid URL")

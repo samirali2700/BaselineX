@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { error } from "console";
 
 export interface ProbeRecord {
   id?: number;
@@ -9,6 +10,7 @@ export interface ProbeRecord {
   response_type: string;
   latency_bucket: string;
   probe_time?: string;
+  error_message?: string;
 }
 
 /**
@@ -16,8 +18,8 @@ export interface ProbeRecord {
  */
 export function insertProbeResult(db: Database.Database, probe: ProbeRecord): number {
   const stmt = db.prepare(`
-    INSERT INTO probes (api_id, endpoint_id, passed, status_code, response_type, latency_bucket)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO probes (api_id, endpoint_id, passed, status_code, response_type, latency_bucket, error_message)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = stmt.run(
@@ -26,7 +28,8 @@ export function insertProbeResult(db: Database.Database, probe: ProbeRecord): nu
     probe.passed ? 1 : 0,
     probe.status_code,
     probe.response_type,
-    probe.latency_bucket
+    probe.latency_bucket,
+    probe.error_message || null
   );
 
   return result.lastInsertRowid as number;

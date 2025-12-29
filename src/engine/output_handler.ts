@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { SettingsConfig } from "../config/settings.schema";
+import { ProbeValidationFull } from "./handlers/request_handler";
 
 // ANSI color codes for console output
 const colors = {
@@ -27,27 +28,7 @@ export interface TaskResults {
     failed: number;
     success_rate: number;
   }>;
-  validations: Array<{
-    api_name: string;
-    endpoint: string;
-    method: string;
-    probeValidation: {
-      statusCode?: number;
-      expectedStatus?: number;
-      expectedFields: string[];
-      new_fields?: string[];
-      removed_fields?: string[];
-      passed: boolean;
-    };
-    baselineComparison?: {
-      exists: boolean;
-      statusCodeMatch: boolean;
-      responseType: boolean;
-      latencyBucket: boolean;
-      passed: boolean;
-    };
-    passed: boolean;
-  }>;
+  validations: ProbeValidationFull[];
 }
 
 /**
@@ -70,12 +51,10 @@ export function outputResults(results: TaskResults, settings: SettingsConfig): v
 }
 
 /**
- * Output results to console with formatted summary
+ * Output results to console with pytest-like format
  */
 function outputAsConsole(results: TaskResults): void {
-  console.log("\n" + "=".repeat(60));
-  console.log("BASELINE TEST SUMMARY");
-  console.log("=".repeat(60));
+  console.log("");
 
   const success: typeof results.validations = [];
   const failures: typeof results.validations = [];
@@ -88,89 +67,103 @@ function outputAsConsole(results: TaskResults): void {
     }
   }
 
-  // SUCCESS SECTION
-  if (success.length === 0) {
-    console.log("No successful endpoints");
-  } else {
-    // Group by API
-    const successByApi = new Map<string, typeof success>();
+  // PASSED SECTION (pytest style: green PASSED)
+  if (success.length > 0) {
     for (const validation of success) {
-      if (!successByApi.has(validation.api_name)) {
-        successByApi.set(validation.api_name, []);
-      }
-      successByApi.get(validation.api_name)!.push(validation);
-    }
-
-    for (const [apiName, apiValidations] of successByApi) {
-      const api = results.apis.find(a => a.api_name === apiName);
-      const allSuccess = api && api.passed === api.total_endpoints;
-      console.log(`${allSuccess ? colors.brightGreen + "" : ""} ${apiName}${colors.reset}`);
-      for (const validation of apiValidations) {
-        console.log(`${colors.green} ${validation.method} ${validation.endpoint}${colors.reset}`);
-      }
+      console.log(
+        `${validation.api_name}::${validation.method} ${validation.endpoint} ${colors.brightGreen}PASSED${colors.reset}`
+      );
     }
   }
 
-  // ❌ FAILURES SECTION
+  // FAILED SECTION (pytest style: red FAILED with traceback)
   if (failures.length > 0) {
-    console.log(`\n${colors.brightRed}❌ FAILED ENDPOINTS:${colors.reset}`);
-    const failuresByApi = new Map<string, typeof failures>();
+    console.log("");
+    
     for (const validation of failures) {
-      if (!failuresByApi.has(validation.api_name)) {
-        failuresByApi.set(validation.api_name, []);
+      console.log(
+        `${validation.api_name}::${validation.method} ${validation.endpoint} ${colors.brightRed}FAILED${colors.reset}`
+      );
+
+      // Connection error - only show API unavailable
+      if ((validation as any).isConnectionError) {
+        console.log(`  ${colors.red}API Unavailable${colors.reset}`);
+        if (validation.errorMessage) {
+          console.log(`  Error: ${validation.errorMessage}`);
+        }
+        continue;
       }
-      failuresByApi.get(validation.api_name)!.push(validation);
-    }
 
-    for (const [apiName, apiValidations] of failuresByApi) {
-      console.log(`\n   ${colors.red}${apiName}${colors.reset}`);
-      for (const validation of apiValidations) {
-        console.log(`      ${colors.brightRed}❌ ${validation.method} ${validation.endpoint}${colors.reset}`);
+      if (validation.errorMessage) {
+        console.log(`  Error: ${validation.errorMessage}`);
+      }
 
-        // Show probe validation results
-        console.log(`         📌 Probe Validation:`);
-        const probeStatus = validation.probeValidation.passed ? `${colors.green}✅${colors.reset}` : `${colors.red}❌${colors.reset}`;
-        console.log(
-          `            ${probeStatus} Status Code: ${validation.probeValidation.statusCode} (expected ${validation.probeValidation.expectedStatus})`
-        );
+      // Probe validation failures
+      if (!validation.probeValidation.passed) {
+        if (validation.probeValidation.statusCode !== validation.probeValidation.expectedStatus) {
+          console.log(
+            `  Expected status code: ${validation.probeValidation.expectedStatus}`
+          );
+          console.log(
+            `  Actual status code: ${colors.red}${validation.probeValidation.statusCode}${colors.reset}`
+          );
+        }
 
         if (validation.probeValidation.new_fields && validation.probeValidation.new_fields.length > 0) {
-          console.log(`            ℹ️  New Fields: ${colors.yellow}${validation.probeValidation.new_fields.join(", ")}${colors.reset}`);
+          console.log(
+            `  Unexpected fields: ${colors.yellow}${validation.probeValidation.new_fields.join(", ")}${colors.reset}`
+          );
         }
 
         if (validation.probeValidation.removed_fields && validation.probeValidation.removed_fields.length > 0) {
           console.log(
-            `            ⚠️  Removed Fields: ${colors.yellow}${validation.probeValidation.removed_fields.join(", ")}${colors.reset}`
+            `  Missing fields: ${colors.yellow}${validation.probeValidation.removed_fields.join(", ")}${colors.reset}`
           );
         }
+      }
 
-        // Show baseline comparison results
-        if (validation.baselineComparison) {
-          console.log(`         🔄 Baseline Comparison:`);
-          if (validation.baselineComparison.exists) {
-            console.log(`            Baseline Found: ${colors.green}✅${colors.reset}`);
-            console.log(`            Status Code Match: ${validation.baselineComparison.statusCodeMatch ? colors.green + "✅" : colors.red + "❌"}${colors.reset}`);
-            
-          } else {
-            console.log(`            Baseline Found: ${colors.red}❌${colors.reset} (No baseline to compare against)`);
+      // Baseline comparison failures
+      if (validation.baselineComparison && !validation.baselineComparison.passed) {
+        if (validation.baselineComparison.exists) {
+          if (!validation.baselineComparison.statusCodeMatch) {
+            console.log(`  Baseline status code mismatch`);
           }
+          if (!validation.baselineComparison.responseType) {
+            console.log(`  Baseline response type mismatch`);
+          }
+          if (!validation.baselineComparison.latencyBucket) {
+            console.log(`  Baseline latency bucket mismatch`);
+          }
+        } else {
+          console.log(`  No baseline to compare against`);
         }
       }
+
+      console.log("");
     }
   }
 
-  // 📊 SUMMARY AT THE BOTTOM
-  console.log("\n" + "=".repeat(60));
-  console.log("SUMMARY:");
-  console.log("=".repeat(60));
-  console.log(`Total APIs: ${results.total_apis}`);
-  console.log(`Total Endpoints: ${results.total_endpoints}`);
-  console.log(`${colors.brightGreen}Passed: ${results.total_passed}${colors.reset}`);
-  console.log(`${colors.brightRed}Failed: ${results.total_failed}${colors.reset}`);
-  console.log(
-    `Success Rate: ${results.success_rate.toFixed(2)}%`
-  );
-  console.log("=".repeat(60) + "\n");
+  // SUMMARY (pytest style)
+  const totalTests = results.total_endpoints;
+  const passedTests = results.total_passed;
+  const failedTests = results.total_failed;
+  const passRate = results.success_rate;
+
+  console.log("=".repeat(70));
+
+  if (failedTests === 0) {
+    console.log(
+      `${colors.brightGreen}${passedTests} passed${colors.reset} in ${totalTests} endpoints`
+    );
+  } else {
+    console.log(
+      `${colors.brightRed}${failedTests} failed${colors.reset}, ${colors.brightGreen}${passedTests} passed${colors.reset} in ${totalTests} endpoints`
+    );
+  }
+
+  console.log(`Success Rate: ${passRate.toFixed(2)}%`);
+  console.log("=".repeat(70));
+  console.log("");
 }
 
 /**

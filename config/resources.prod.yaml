@@ -1,0 +1,89 @@
+# BaselineX configuration
+# Defines which API endpoints are availability-critical
+# and should be verified against a known healthy baseline.
+version: 1.0.0
+apis:
+  - name: Users API
+    base_url: http://localhost:3001
+    endpoints:
+      - path: /users
+        method: GET
+        expected_status: 200
+        expected_fields:
+          - id
+          - name
+          - email
+
+      - path: /users
+        method: POST
+        expected_status: 201
+        expected_fields:
+          - id
+          - name
+          - email
+        request:
+          fixture:
+            type: synthetic
+            body:
+              name: test
+              email: test@ali.com
+
+  - name: Comments API
+    base_url: http://localhost:3003
+    endpoints:
+      - path: /comments
+        method: GET
+        expected_status: 200
+        expected_fields:
+          - id
+          - postId
+          - author
+          - text
+
+      - path: /comments
+        method: POST
+        expected_status: 201
+        expected_fields:
+          - id
+          - postId
+          - author
+          - text
+        request:
+          fixture:
+            type: synthetic
+            body:
+              postId: test
+              author: test
+              text: This is a test comment
+
+
+  - name: Posts API
+    base_url: http://localhost:3002
+    endpoints:
+      - path: /posts
+        method: GET
+        expected_status: 200
+        expected_fields:
+          - id
+          - title
+          - author
+          - content
+
+      - path: /posts
+        method: POST
+        expected_status: 201
+        expected_fields:
+          - id
+          - title
+          - author
+          - content
+        request:
+          fixture:
+            type: synthetic
+            body:
+              title: test title
+              author: test
+              content: This is a test content
+
+   
+    

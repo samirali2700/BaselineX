@@ -2,6 +2,13 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 
+// ANSI color codes
+const colors = {
+  reset: "\x1b[0m",
+  green: "\x1b[32m",
+  cyan: "\x1b[36m",
+};
+
 const DB_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DB_DIR, "baseline.db");
 
@@ -14,7 +21,7 @@ export function initializeDatabase(): Database.Database {
   // Create data directory if it doesn't exist
   if (!fs.existsSync(DB_DIR)) {
     fs.mkdirSync(DB_DIR, { recursive: true });
-    console.log(`📁 Created database directory: ${DB_DIR}`);
+    console.log(`${colors.cyan}[INIT]${colors.reset} Created database directory: ${DB_DIR}`);
   }
 
   // Check if database already exists
@@ -24,9 +31,9 @@ export function initializeDatabase(): Database.Database {
   const db = new Database(DB_PATH);
   
   if (dbExists) {
-    console.log(`✅ Connected to existing database: ${DB_PATH}`);
+    console.log(`${colors.green}[OK]${colors.reset} Connected to existing database: ${DB_PATH}`);
   } else {
-    console.log(`📝 Creating new database: ${DB_PATH}`);
+    console.log(`${colors.cyan}[INIT]${colors.reset} Creating new database: ${DB_PATH}`);
     initializeSchema(db);
   }
 
@@ -81,6 +88,7 @@ function initializeSchema(db: Database.Database): void {
       status_code INTEGER NOT NULL,
       response_type TEXT NOT NULL,
       latency_bucket TEXT NOT NULL,
+      error_message TEXT,
       probe_time DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (api_id) REFERENCES apis(id) ON DELETE CASCADE,
       FOREIGN KEY (endpoint_id) REFERENCES endpoints(id) ON DELETE CASCADE

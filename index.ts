@@ -3,7 +3,9 @@ import { getDatabase, closeDatabase } from "./src/engine/db_initializer";
 
 const db = getDatabase();
 
-main(db)
+const verbose = process.argv.includes("-v");
+
+main(db, verbose)
   .then(() => {
     console.log("\n✅ Application completed successfully");
     closeDatabase();

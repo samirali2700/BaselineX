@@ -3,6 +3,16 @@ import { getLatestBaseline, insertBaseline, BaselineRecord } from "../database/b
 import { getProbesByEndpoint } from "../database/probe.queries";
 import { SettingsConfig } from "../config/settings.schema";
 
+// ANSI color codes
+const colors = {
+  reset: "\x1b[0m",
+  green: "\x1b[32m",
+  red: "\x1b[31m",
+  yellow: "\x1b[33m",
+  brightGreen: "\x1b[92m",
+  brightYellow: "\x1b[93m",
+};
+
 /**
  * Check if a baseline exists for an endpoint
  * If not, create one if the required successful probes threshold is met
@@ -25,7 +35,7 @@ export async function checkAndCreateBaseline(
   
   if (allProbes.length === 0) {
     console.log(
-      `  ⚠️  No probes found for endpoint (ID: ${endpointId})`
+      `  ${colors.brightYellow}[SKIP]${colors.reset} No probes found for endpoint (ID: ${endpointId})`
     );
     return null;
   }
@@ -40,7 +50,7 @@ export async function checkAndCreateBaseline(
   // Step 4: Check if we have enough probes
   if (recentProbes.length < requiredSuccessfulProbes) {
     console.log(
-      `  ⚠️  Not enough probes yet. Have ${recentProbes.length}, need ${requiredSuccessfulProbes}`
+      `  ${colors.yellow}[WAIT]${colors.reset} Not enough probes yet. Have ${recentProbes.length}, need ${requiredSuccessfulProbes}`
     );
     return null;
   }
@@ -51,14 +61,14 @@ export async function checkAndCreateBaseline(
   if (!allSuccessful) {
     const successCount = recentProbes.filter((p) => p.passed).length;
     console.log(
-      `  ⚠️  Not all recent probes are successful. ${successCount}/${requiredSuccessfulProbes} passed`
+      `  ${colors.red}[FAIL]${colors.reset} Not all recent probes are successful. ${successCount}/${requiredSuccessfulProbes} passed`
     );
     return null;
   }
 
   // Step 6: All conditions met - create a baseline
   console.log(
-    `  ✨ Creating baseline - ${requiredSuccessfulProbes} successful probes confirmed`
+    `  ${colors.green}[INFO]${colors.reset} Creating baseline - ${requiredSuccessfulProbes} successful probes confirmed`
   );
 
   // Use the most recent probe as the baseline
@@ -69,7 +79,7 @@ export async function checkAndCreateBaseline(
     probe_id: baselineProbe.id!,
   });
 
-  console.log(`  ✅ Baseline created (ID: ${baselineId})`);
+  console.log(`  ${colors.brightGreen}[PASS]${colors.reset} Baseline created (ID: ${baselineId})`);
 
   return {
     id: baselineId,

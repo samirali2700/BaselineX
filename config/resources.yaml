@@ -7,16 +7,10 @@ apis:
     base_url: http://localhost:3001
     endpoints:
       - path: /users
-        method: GET
-        expected_status: 200
-        expected_fields:
-          - id
-          - name
-          - email
-
-      - path: /users
         method: POST
         expected_status: 201
+        stash:
+          userId: id
         expected_fields:
           - id
           - name
@@ -27,6 +21,27 @@ apis:
             body:
               name: test
               email: test@ali.com
+              newAttribute: someValue
+
+      - path: /users
+        method: GET
+        expected_status: 200
+        expected_fields:
+          - id
+          - name
+          - email
+
+      - path: /users/{{userId}}
+        method: GET
+        expected_status: 200
+        expected_fields:
+          - id
+          - name
+          - email
+
+      - path: /users/{{userId}}
+        method: DELETE
+        expected_status: 204
 
   - name: Comments API
     base_url: http://localhost:3003
@@ -43,6 +58,8 @@ apis:
       - path: /comments
         method: POST
         expected_status: 201
+        stash:
+          commentId: id
         expected_fields:
           - id
           - postId
@@ -52,10 +69,27 @@ apis:
           fixture:
             type: synthetic
             body:
-              postId: test
+              postId: 1
               author: test
               text: This is a test comment
 
+      - path: /comments/{{commentId}}
+        method: DELETE
+        expected_status: 200
+        expected_fields:
+          - id
+          - postId
+          - author
+          - text
+
+      - path: /comments/post/1
+        method: GET
+        expected_status: 200
+        expected_fields:
+          - id
+          - postId
+          - author
+          - text
 
   - name: Posts API
     base_url: http://localhost:3002
@@ -68,15 +102,19 @@ apis:
           - title
           - author
           - content
+          - userId
 
       - path: /posts
         method: POST
         expected_status: 201
+        stash:
+          postId: id
         expected_fields:
           - id
           - title
           - author
           - content
+          - userId
         request:
           fixture:
             type: synthetic
@@ -84,6 +122,89 @@ apis:
               title: test title
               author: test
               content: This is a test content
+              userId: 1
 
-   
-    
+      - path: /posts/{{postId}}
+        method: DELETE
+        expected_status: 200
+        expected_fields:
+          - id
+          - title
+          - author
+          - content
+          - userId
+
+      - path: /posts/user/1
+        method: GET
+        expected_status: 200
+        expected_fields:
+          - id
+          - title
+          - author
+          - content
+          - userId
+
+  - name: Portal API
+    base_url: http://localhost:3004
+    endpoints:
+      - path: /portal/users
+        method: GET
+        expected_status: 200
+        expected_fields:
+          - id
+          - name
+          - email
+          - posts
+
+      - path: /portal/users/1
+        method: GET
+        expected_status: 200
+        expected_fields:
+          - id
+          - name
+          - email
+          - posts
+
+      - path: /portal/users/1/posts
+        method: POST
+        expected_status: 201
+        stash:
+          portalPostId: id
+        expected_fields:
+          - id
+          - title
+          - author
+          - content
+          - userId
+        request:
+          fixture:
+            type: synthetic
+            body:
+              title: Portal Post
+              author: PortalUser
+              content: Content from portal
+
+      - path: /portal/users/1/posts/{{portalPostId}}
+        method: DELETE
+        expected_status: 204
+
+      - path: /portal/posts/{{portalPostId}}/comments
+        method: POST
+        expected_status: 201
+        stash:
+          portalCommentId: id
+        expected_fields:
+          - id
+          - postId
+          - author
+          - text
+        request:
+          fixture:
+            type: synthetic
+            body:
+              author: PortalCommenter
+              text: Comment from portal
+
+      - path: /portal/posts/{{portalPostId}}/comments/{{portalCommentId}}
+        method: DELETE
+        expected_status: 204

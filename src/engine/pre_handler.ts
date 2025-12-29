@@ -3,6 +3,15 @@ import { insertOrGetApi, getApiByName } from "../database/api.queries";
 import { insertEndpoint, getEndpoint } from "../database/endpoints.queries";
 import { ApiConfig } from "../config/resources.schema";
 
+// ANSI color codes
+const colors = {
+  reset: "\x1b[0m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  brightGreen: "\x1b[92m",
+  cyan: "\x1b[36m",
+};
+
 /**
  * Pre-handler for endpoints
  * Checks the database for APIs and their endpoints
@@ -11,7 +20,8 @@ import { ApiConfig } from "../config/resources.schema";
  */
 export async function preHandleEndpoints(
   db: Database.Database,
-  api: ApiConfig
+  api: ApiConfig,
+  verbose: boolean = false
 ): Promise<Map<string, { apiId: number; endpoints: Map<string, number> }>> {
   const apiMap = new Map<
     string,
@@ -19,14 +29,14 @@ export async function preHandleEndpoints(
   >();
 
     
-    console.log(`\n📋 Pre-processing API: ${api.name}`);
+    if (verbose) console.log(`\n${colors.cyan}[INIT]${colors.reset} Pre-processing API: ${api.name}`);
 
     // Step 1: Insert or get API
     const apiId = insertOrGetApi(db, {
         name: api.name,
         base_url: api.base_url,
     });
-    console.log(`  ✅ API registered (ID: ${apiId})`);
+    if (verbose) console.log(`  ${colors.green}[OK]${colors.reset} API registered (ID: ${apiId})`);
 
     // Step 2: Process endpoints
     const endpointMap = new Map<string, number>();
@@ -49,7 +59,7 @@ export async function preHandleEndpoints(
         if (existingEndpoint && existingEndpoint.id) {
         endpointId = existingEndpoint.id;
         existingEndpoints++;
-        console.log(`  ↪️  Endpoint exists: ${endpointKey}`);
+        if (verbose) console.log(`  ${colors.green}[OK]${colors.reset} Endpoint exists: ${endpointKey}`);
         } else {
         // Insert new endpoint
         endpointId = insertEndpoint(db, {
@@ -61,15 +71,15 @@ export async function preHandleEndpoints(
             body_fixture_params: extractBodyFixtureParams(endpoint),
         });
         newEndpoints++;
-        console.log(`  ✨ Endpoint added: ${endpointKey} (ID: ${endpointId})`);
+        if (verbose) console.log(`  ${colors.brightGreen}[NEW]${colors.reset} Endpoint added: ${endpointKey} (ID: ${endpointId})`);
         }
 
         endpointMap.set(endpointKey, endpointId);
     }
 
     // Summary for API
-    console.log(
-        `  📊 Summary: ${existingEndpoints} existing, ${newEndpoints} new endpoints`
+    if (verbose) console.log(
+        `  ${colors.cyan}[INFO]${colors.reset} Summary: ${existingEndpoints} existing, ${newEndpoints} new endpoints`
     );
 
     apiMap.set(api.name, {

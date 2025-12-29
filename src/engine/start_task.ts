@@ -1,51 +1,19 @@
 import Database from "better-sqlite3";
 import { EndpointConfig,  ResourcesConfig } from "../config/resources.schema";
 import { SettingsConfig } from "../config/settings.schema";
-import { probeEndpoint } from "../probe/prob.api";
-import { BaselineRecord, getLatestBaseline } from "../database/baseline.queries";
-import { getApiByName } from "../database/api.queries";
-import { getEndpoint } from "../database/endpoints.queries";
 import { preHandleEndpoints, PreHandlerResult } from "./pre_handler";
-import { getProbeById, insertProbeResult, ProbeRecord } from "../database/probe.queries";
+import { insertProbeResult } from "../database/probe.queries";
 import { outputResults } from "./output_handler";
 import { checkAndCreateBaseline } from "./baseline_handler";
+import { probeHandler, validateProbeResponse, ProbeValidationFull } from "./handlers/request_handler";
 
-
-type TaskResult = {
-    api_name: string;
-    endpoint: string;
-    method: string;
-    statusCode?: number;
-    fields?: string[];
-    error?: string;
-    responseType: string;
-    latencyBucket: string;
-}
-
-type ProbeValidationResult = {
-    statusCode?: number;
-    expectedStatus?: number;
-    expectedFields: string[];
-    new_fields?: string[];
-    removed_fields?: string[];
-    passed: boolean;
-};
-
-type BaselineComparisonResult = {
-    exists: boolean;
-    statusCodeMatch: boolean;
-    responseType: boolean;
-    latencyBucket: boolean;
-    passed: boolean;
-};
-
-type ValidationResult = {
-    api_name: string;
-    endpoint: string;
-    method: string;
-    probeValidation: ProbeValidationResult;
-    baselineComparison?: BaselineComparisonResult;
-    passed: boolean; // Final result - baseline takes precedence if it exists
+// ANSI color codes
+const colors = {
+  reset: "\x1b[0m",
+  green: "\x1b[32m",
+  red: "\x1b[31m",
+  brightGreen: "\x1b[92m",
+  cyan: "\x1b[36m",
 };
 
 type TaskSummary = {
@@ -63,63 +31,69 @@ type TaskResults = {
     total_failed: number;
     success_rate: number;
     apis: TaskSummary[];
-    validations: ValidationResult[];
+    validations: ProbeValidationFull[];
 };
 
+export async function startTask(db: Database.Database, settings: SettingsConfig, resources: ResourcesConfig, verbose: boolean = false): Promise<TaskResults> {
+    if (verbose) console.log(`${colors.cyan}[INFO]${colors.reset} Starting task ...`);
 
-async function getBaseline(db: Database.Database, apiId: number, endpointId: number): Promise<ProbeRecord | null> {
-    // Get the latest baseline directly with API and endpoint IDs
-    const baseline = getLatestBaseline(db, apiId, endpointId);
-    if (!baseline) {
-        return null;
-    }
-
-    const probe = getProbeById(db, baseline.probe_id);
-    if (!probe) {
-        return null;
-    }
-
-    return probe;
-}
-
-export async function startTask(db: Database.Database, settings: SettingsConfig, resources: ResourcesConfig): Promise<TaskResults> {
-    console.log("Starting task ...");
-
-    const validations: ValidationResult[] = [];
+    const validations: ProbeValidationFull[] = [];
     const apiSummaries: TaskSummary[] = [];
     let totalPassed = 0;
     let totalFailed = 0;
 
+    // Global variables stash for the entire task run
+    const variables: Record<string, any> = {};
+
     for (const api of resources.apis) {
+        if (api.disabled) {
+            if (verbose) console.log(`${colors.cyan}[INFO]${colors.reset} Skipping disabled API: ${api.name}`);
+            continue;
+        }
+
         try {
-            const apiDetails = await preHandleEndpoints(db, api); 
+            const apiDetails = await preHandleEndpoints(db, api, verbose); 
             const apiData = apiDetails.get(api.name);
 
             if (!apiData) {
-                console.log(`❌ Failed to process API: ${api.name}`);
+                console.log(`${colors.red}[ERROR]${colors.reset} Failed to process API: ${api.name}`);
                 continue;
             }
 
-            console.log(`\nProbing API: ${api.name} (${api.base_url})`);
+            if (verbose) console.log(`\n${colors.cyan}[PROBE]${colors.reset} Probing API: ${api.name} (${api.base_url})`);
             
             let apiPassed = 0;
             let apiFailed = 0;
 
             for (const endpoint of api.endpoints) {
                 try {
-
-                    const endpointKey = `${endpoint.method} ${endpoint.path}`;
-                    const endpointId = apiData.endpoints.get(endpointKey);
+                    // Resolve variables in endpoint configuration
+                    const resolvedEndpoint = resolveEndpointVariables(endpoint, variables);
+                    const endpointKey = `${resolvedEndpoint.method} ${resolvedEndpoint.path}`;
+                    
+                    // Use original endpoint key for ID lookup as pre-handler uses raw paths
+                    // Note: This assumes pre-handler stores paths with variables intact or we need to handle this mismatch
+                    // For now, let's try to find ID using the raw path from config if possible, or resolved path
+                    let endpointId = apiData.endpoints.get(`${endpoint.method} ${endpoint.path}`);
+                    
+                    if (!endpointId) {
+                         // Fallback to resolved path if raw path not found (though pre-handler likely saw raw path)
+                         endpointId = apiData.endpoints.get(endpointKey);
+                    }
 
                     if (!endpointId) {
-                        console.log(`  ❌ Endpoint not found in pre-handler: ${endpointKey}`);
+                        if (verbose) console.log(`  ${colors.red}[ERROR]${colors.reset} Endpoint not found in pre-handler: ${endpoint.method} ${endpoint.path}`);
                         continue;
                     }
 
-                    const probeResult = await runProbe(api, endpoint, settings);
-                    const baseline = await getBaseline(db, apiData.apiId, endpointId);
-                    const validationResult = validateResponse(probeResult, endpoint, baseline);
+                    const probeResult = await probeHandler(api, resolvedEndpoint, settings);
+                    const validationResult = await validateProbeResponse(db, probeResult, resolvedEndpoint, apiData.apiId, endpointId);
                     
+                    // Stash variables if successful
+                    if (validationResult.passed && endpoint.stash && probeResult.data) {
+                        updateVariables(variables, probeResult.data, endpoint.stash, verbose);
+                    }
+
                     insertProbeResult(
                         db, {
                             api_id: apiData.apiId,
@@ -127,7 +101,8 @@ export async function startTask(db: Database.Database, settings: SettingsConfig,
                             passed: validationResult.passed,
                             status_code: probeResult.statusCode || 0,
                             response_type: probeResult.responseType,
-                            latency_bucket: probeResult.latencyBucket
+                            latency_bucket: probeResult.latencyBucket,
+                            error_message: probeResult.error || undefined,
                         }
                     );
                     
@@ -135,7 +110,7 @@ export async function startTask(db: Database.Database, settings: SettingsConfig,
                     await checkAndCreateBaseline(db, apiData.apiId, endpointId, settings);
                     
                     validations.push(validationResult);
-                    console.log(`  ${validationResult.passed ? '✅' : '❌'} ${endpointKey}`);
+                    if (verbose) console.log(`  ${validationResult.passed ? colors.green + '[OK]' : colors.red + '[ERR]'}${colors.reset} ${endpointKey}`);
                     
                     if (validationResult.passed) {
                         apiPassed++;
@@ -145,7 +120,7 @@ export async function startTask(db: Database.Database, settings: SettingsConfig,
                         totalFailed++;
                     }
                 } catch (endpointError) {
-                    console.error(`  ❌ Error processing endpoint:`, endpointError);
+                    if (verbose) console.error(`  ❌ Error processing endpoint:`, endpointError);
                     apiFailed++;
                     totalFailed++;
                 }
@@ -162,7 +137,7 @@ export async function startTask(db: Database.Database, settings: SettingsConfig,
                 success_rate: successRate,
             });
         } catch (apiError) {
-            console.error(`❌ Error processing API:`, apiError);
+            if (verbose) console.error(`❌ Error processing API:`, apiError);
         }
     }
 
@@ -186,113 +161,63 @@ export async function startTask(db: Database.Database, settings: SettingsConfig,
     return results;
 }
 
-export async function runProbe(api: any, endpoint: EndpointConfig, settings: SettingsConfig): Promise<TaskResult> {
-    let url = new URL(`${api.base_url}${endpoint.path}`);
-    
-    // Add query parameters if fixture contains query params
-    if (endpoint.request?.fixture?.query) {
-        for (const [key, value] of Object.entries(endpoint.request.fixture.query)) {
-            url.searchParams.append(key, String(value));
+/**
+ * Recursively replace variables in an object or string
+ */
+function replaceVariables(target: any, variables: Record<string, any>): any {
+    if (typeof target === 'string') {
+        return target.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
+            return variables[key] !== undefined ? String(variables[key]) : match;
+        });
+    } else if (Array.isArray(target)) {
+        return target.map(item => replaceVariables(item, variables));
+    } else if (typeof target === 'object' && target !== null) {
+        const result: any = {};
+        for (const key in target) {
+            result[key] = replaceVariables(target[key], variables);
         }
+        return result;
     }
-    
-    const fullUrl = url.toString();
-
-    
-    try {
-        const result = await probeEndpoint(
-            fullUrl,
-            endpoint.method,
-            endpoint.request?.fixture?.body,
-            settings.settings.run.timeout_seconds * 1000
-        );
-        
-        return {
-            api_name: api.name,
-            endpoint: endpoint.path,
-            method: endpoint.method,
-            statusCode: result.statusCode,
-            responseType: result.responseType,
-            fields: result.body ? result.body : [],
-            latencyBucket: result.latencyBucket
-            
-        } as TaskResult;
-
-    } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        return {
-            api_name: api.name,
-            endpoint: endpoint.path,
-            method: endpoint.method,
-            error: errorMessage
-        } as TaskResult;
-    }
+    return target;
 }
 
-function validateResponse(result: TaskResult, resource: EndpointConfig, baseline: ProbeRecord | null): ValidationResult {
-    // Step 1: Validate probe against expected configuration
-    const probeValidation: ProbeValidationResult = {
-        statusCode: result.statusCode,
-        expectedStatus: resource.expected_status,
-        expectedFields: resource.expected_fields || [],
-        new_fields: [],
-        removed_fields: [],
-        passed: true
-    };
-
-    // Validate status code
-    if (result.statusCode !== resource.expected_status) {
-        probeValidation.passed = false;
-    }
-
-    // Validate fields
-    const expectedFields = resource.expected_fields || [];
-    const actualFields = result.fields || [];
-
-    probeValidation.new_fields = actualFields.filter(field => !expectedFields.includes(field));
-    probeValidation.removed_fields = expectedFields.filter(field => !actualFields.includes(field));
-
-    if (probeValidation.new_fields.length > 0 || probeValidation.removed_fields.length > 0) {
-        probeValidation.passed = false;
-    }
-
-    // Step 2: Compare against baseline if it exists
-    let baselineComparison: BaselineComparisonResult | undefined;
-    let finalPassed = probeValidation.passed;
-
-    if (baseline) {
-        baselineComparison = {
-            exists: true,
-            statusCodeMatch: baseline.status_code === result.statusCode,
-            responseType: baseline.response_type === result.responseType,
-            latencyBucket: baseline.latency_bucket === result.latencyBucket,
-            passed: true
-        };
-
-        // Baseline comparison takes precedence
-        if (!baselineComparison.statusCodeMatch || !baselineComparison.responseType) {
-            baselineComparison.passed = false;
+/**
+ * Create a new endpoint config with variables resolved
+ */
+function resolveEndpointVariables(endpoint: EndpointConfig, variables: Record<string, any>): EndpointConfig {
+    // Deep clone to avoid mutating original config
+    const clone = JSON.parse(JSON.stringify(endpoint));
+    
+    // Resolve path
+    clone.path = replaceVariables(clone.path, variables);
+    
+    // Resolve request body/query if they exist
+    if (clone.request?.fixture) {
+        if (clone.request.fixture.body) {
+            clone.request.fixture.body = replaceVariables(clone.request.fixture.body, variables);
         }
-
-        finalPassed = baselineComparison.passed;
-    } else {
-        baselineComparison = {
-            exists: false,
-            statusCodeMatch: false,
-            responseType: false,
-            latencyBucket: false,
-            passed: false
-        };
+        if (clone.request.fixture.query) {
+            clone.request.fixture.query = replaceVariables(clone.request.fixture.query, variables);
+        }
     }
+    
+    return clone;
+}
 
-    const validation: ValidationResult = {
-        api_name: result.api_name,
-        endpoint: result.endpoint,
-        method: result.method,
-        probeValidation,
-        baselineComparison,
-        passed: finalPassed
-    };
-
-    return validation;
+/**
+ * Update variables map from response data based on stash config
+ */
+function updateVariables(variables: Record<string, any>, data: any, stash: Record<string, string>, verbose: boolean) {
+    for (const [varName, path] of Object.entries(stash)) {
+        // Simple property access for now (e.g. "id" or "user.id")
+        // For flat objects "id" works. For nested, we might need a helper.
+        // Assuming flat or simple access for MVP.
+        const value = data[path]; 
+        if (value !== undefined) {
+            variables[varName] = value;
+            if (verbose) console.log(`${colors.cyan}[STASH]${colors.reset} Stashed ${varName} = ${value}`);
+        } else {
+            if (verbose) console.log(`${colors.red}[STASH]${colors.reset} Failed to stash ${varName}: path '${path}' not found in response`);
+        }
+    }
 }
